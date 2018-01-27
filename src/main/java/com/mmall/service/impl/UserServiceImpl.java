@@ -2,6 +2,7 @@ package com.mmall.service.impl;
 
 import com.mmall.common.Const;
 import com.mmall.common.ServerResponse;
+import com.mmall.common.TokenCache;
 import com.mmall.dao.UserMapper;
 import com.mmall.pojo.User;
 import com.mmall.service.IUserService;
@@ -37,11 +38,11 @@ public class UserServiceImpl implements IUserService {
     }
 
     public ServerResponse<String> register(User user) {
-        ServerResponse validResponse = this.checkValid(user.getUsername(),Const.USERNAME);
+        ServerResponse validResponse = this.checkValid(user.getUsername(), Const.USERNAME);
         if (!validResponse.IsSuccess()) {
             return validResponse;
         }
-        validResponse = this.checkValid(user.getEmail(),Const.EMAIL);
+        validResponse = this.checkValid(user.getEmail(), Const.EMAIL);
         if (!validResponse.IsSuccess()) {
             return validResponse;
         }
@@ -49,7 +50,7 @@ public class UserServiceImpl implements IUserService {
         user.setRole(Const.Role.ROLE_CUSTOMER);
         //MD5 加密
         user.setPassword(MD5Util.MD5EncodeUtf8(user.getPassword()));
-        int resultCount = userMapper.insert(user);
+         int resultCount = userMapper.insert(user);
         if (resultCount == 0) {
             return ServerResponse.createByErrorMessage("注册失败");
         }
@@ -57,19 +58,19 @@ public class UserServiceImpl implements IUserService {
     }
 
 
-    public ServerResponse<String> checkValid(String str,String type) {
+    public ServerResponse<String> checkValid(String str, String type) {
         if (StringUtils.isNotBlank(type)) {
             if (Const.USERNAME.equals(type)) {
                 int resultCount = userMapper.checkUserName(str);
                 if (resultCount > 0) {
-                    return  ServerResponse.createByErrorMessage("此用户名已经存在");
+                    return ServerResponse.createByErrorMessage("此用户名已经存在");
                 }
             }
 
             if (Const.EMAIL.equals(type)) {
                 int resultCount = userMapper.checkUserEmail(str);
                 if (resultCount > 0) {
-                    return  ServerResponse.createByErrorMessage("此Email已经存在");
+                    return ServerResponse.createByErrorMessage("此Email已经存在");
                 }
             }
 
@@ -91,12 +92,82 @@ public class UserServiceImpl implements IUserService {
         return ServerResponse.createByErrorMessage("找回密码的问题是空的");
     }
 
-//    public ServerResponse<String> checkAnswer(String username,String question,String answer) {
-//        int resultCount = userMapper.checkAnswer(username,question, answer);
-//        if (resultCount > 0) {
-//            String forgetToken = UUID.randomUUID().toString();
-//
-//        }
-//
-//    }
+    public ServerResponse<String> checkAnswer(String username, String question, String answer) {
+        int resultCount = userMapper.checkAnswer(username, question, answer);
+        if (resultCount > 0) {
+            String forgetToken = UUID.randomUUID().toString();
+            TokenCache.setKey(TokenCache.TOKEN_PREFIX + username, forgetToken);
+            return ServerResponse.createBySuccess(forgetToken);
+        }
+        return ServerResponse.createByErrorMessage("问题答案错误");
+    }
+
+    public ServerResponse<String> forgetResetPassword(String username, String passwordNew, String forgetToken) {
+        if (StringUtils.isBlank(forgetToken)) {
+            return ServerResponse.createByErrorMessage("参数错误,Token需要传递");
+        }
+        ServerResponse vaildResponse = this.checkValid(username, Const.USERNAME);
+        if (vaildResponse.IsSuccess()) {
+            return ServerResponse.createByErrorMessage("用户不存在");
+        }
+        String token = TokenCache.getKey(TokenCache.TOKEN_PREFIX + username);
+        if (StringUtils.isBlank(token)) {
+            return ServerResponse.createByErrorMessage("token无效或者过期");
+        }
+
+        if (StringUtils.equals(forgetToken, token)) {
+            String md5Password = MD5Util.MD5EncodeUtf8(passwordNew);
+            int rowCount = userMapper.updatePasswordByUsername(username, md5Password);
+            if (rowCount > 0) {
+                return ServerResponse.createBySuccessMessage("修改密码成功");
+            } else {
+                return ServerResponse.createByErrorMessage("Token错误,请重新获取Token");
+            }
+        }
+        return ServerResponse.createByErrorMessage("修改密码失败");
+    }
+
+
+    public ServerResponse<String> resetPassword(String password, String passwordNew, User user) {
+
+        int resultCount = userMapper.checkPassword(user.getId(), MD5Util.MD5EncodeUtf8(password));
+        if (resultCount == 0) {
+            return ServerResponse.createByErrorMessage("旧密码错误");
+        }
+        user.setPassword(MD5Util.MD5EncodeUtf8(passwordNew));
+        int updateCount = userMapper.updateByPrimaryKeySelective(user);
+        if (updateCount > 0) {
+            return ServerResponse.createBySuccessMessage("密码更新成功");
+        }
+        return ServerResponse.createByErrorMessage("密码更新失败");
+    }
+
+    public ServerResponse<User> updateInformation(User user) {
+        int resultCount = userMapper.checkEmailByUserId(user.getEmail(), user.getId());
+        if (resultCount > 0) {
+            return ServerResponse.createByErrorMessage("email 已经存在,请更换其他地址");
+        }
+        User updateUser = new User();
+        updateUser.setId(user.getId());
+        updateUser.setEmail(user.getEmail());
+        updateUser.setPhone(user.getPhone());
+        updateUser.setQuestion(user.getQuestion());
+        updateUser.setAnswer(user.getAnswer());
+        int updateResult = 1;
+//        int updateResult = userMapper.updateByPrimaryKeySelective(updateUser);
+        if (updateResult > 0) {
+            return ServerResponse.createBySuccess("更新个人信息成功", updateUser);
+        }
+        return ServerResponse.createByErrorMessage("更新个人信息失败");
+    }
+
+    public ServerResponse<User> getInformation(Integer userId) {
+        User user = userMapper.selectByPrimaryKey(userId);
+        if (user == null) {
+            return ServerResponse.createByErrorMessage("找不到当前用户");
+        }
+        user.setPassword(StringUtils.EMPTY);
+        return ServerResponse.createBySuccess(user);
+
+    }
 }
